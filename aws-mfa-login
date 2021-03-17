@@ -1,0 +1,64 @@
+#!/bin/bash
+
+set -e
+
+function error {
+	echo $1
+	exit 1
+}
+
+if [[ $(which aws) == "" ]] ;  then
+	error "\`aws\` not found, please install it first!"
+fi
+
+if [[ ! -f "$HOME/.aws/credentials" ]] ; then
+	echo "AWS CLI is not configured yet! Doing it now..."
+	echo "Please provide your AWS access key and the corresonding secret."
+	echo "If you lost them, you can generate a new one on the AWS web console under"
+	echo "IAM / Users / \$YOU / Security credentials / Access keys / Create access key."
+	echo "Also don't forget to deactivate any keys you lost access to!"
+	echo ""
+
+	aws configure ;
+fi
+
+MFA_ARN_FILE="$HOME/.aws/mfa-arn"
+MFA_ARN=""
+
+if [[ ! -f "$MFA_ARN_FILE" ]] ; then
+
+	echo "MFA ARN file (${MFA_ARN_FILE}) not found, creating..."
+	echo ""
+	echo "Please copy and paste your MFA device's ARN, found on the AWS web console"
+	echo "under IAM / Users / \$YOU / Security credentials / Assigned MFA device."
+	echo ""
+
+	read -p "ARN: " MFA_ARN
+	touch $MFA_ARN_FILE
+	echo $MFA_ARN > $MFA_ARN_FILE
+
+	echo "${MFA_ARN_FILE} created, continuing..."
+else
+	echo "MFA ARN file ($MFA_ARN_FILE) exists, reading..."
+	MFA_ARN=$(cat $MFA_ARN_FILE)
+fi
+
+if [[ $1 == "" ]] ; then
+	error "Please provide your current MFA token!"
+fi
+
+COMMAND="aws --output text sts get-session-token --serial-number $MFA_ARN --token-code $1"
+
+echo "Getting temporary session tokens..."
+echo "\$ $COMMAND"
+
+RESPONSE=$($COMMAND)
+
+export AWS_ACCESS_KEY_ID=$(echo $RESPONSE | cut -d" " -f2)
+export AWS_SECRET_ACCESS_KEY=$(echo $RESPONSE | cut -d" " -f4)
+export AWS_SESSION_TOKEN=$(echo $RESPONSE | cut -d" " -f5)
+
+echo "Temporary access credentials set, valid until $(echo $RESPONSE | cut -d" " -f 3)!"
+echo "Starting subshell with active credentials..."
+
+exec $SHELL
